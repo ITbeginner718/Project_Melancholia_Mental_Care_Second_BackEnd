@@ -1,15 +1,15 @@
 import OpenAI from "openai";
 import 'dotenv/config';
-
-// 세션 관리
-let conversationHistory = [];
+import { redisDelete, redisLoad, redisSaveMsg } from "../Cache/redis.js";
 
 
 const openai = new OpenAI({
+    // @ts-ignore
     api_key: 'process.env.OPENAI_API_KEY'
 });
 
-
+const ROLE_USER="user";
+const ROLE_ASSISTANT="assistant";
 
 const chatConfig = {
     model: 'gpt-4o-mini',
@@ -20,32 +20,23 @@ const chatConfig = {
     frequency_penalty: 0.4  // 반복적인 응답 방지
 };
 
-
-
 // ChatGPT에 대화식으로 요청을 보내는 함수
-export async function callChatGPT(userName, topic,userMessage) {
+export async function callChatGptFirst(userName, topic, key) {
 
-     // 초기 시스템 메시지 설정 (첫 대화시에만)
-     if (conversationHistory.length === 0) {
-        //console.log(message)
-        const prompt = createPrompt(userName, topic);
-
-        prompt.map((data)=>(
-            conversationHistory.push(data)
-        ))
-    }
-
-    if(userMessage)
-    {
-    // 새로운 사용자 메시지 추가
-    conversationHistory.push({
-        role: 'user',
-        content: userMessage
-    });
-    }
+    //console.log(message)
+    //해당 분야를 처음 상담 프롬프트
+    const prompt = createPromptCounselFirst(userName, topic);
+    
+    //redis save
+    prompt.map( async (data)=>(
+        await redisSaveMsg(key,data.role, data.content)
+    ));
 
 
     try {
+
+        //redis gpt 세션 데이터 가져오기
+        const conversationHistory = await redisLoad(key);
 
         console.log("대화 내용:", conversationHistory);
         const response = await openai.chat.completions.create(
@@ -60,10 +51,7 @@ export async function callChatGPT(userName, topic,userMessage) {
         console.log('ChatGPT 답변:', answer);
 
         // 상담사 응답 저장
-        conversationHistory.push({
-            role: 'assistant',
-            content: answer
-        });
+        await redisSaveMsg(key, 'assistant', answer);
 
         return answer;
 
@@ -73,10 +61,57 @@ export async function callChatGPT(userName, topic,userMessage) {
     }
 }
 
-function createPrompt(userName, topic)
+//상담 진행
+export async function callChatGPT(key, userMessage)
+{
+    //redis 사용자 데이터 저장
+    try {
+        if(userMessage)
+        {
+            //데이터 저장
+            await redisSaveMsg(key,ROLE_USER, userMessage);
+        }
+        
+    } catch (error) {
+        console.log("redis error:", error);
+    } 
+
+    //gpt api 호출
+    try {
+        //대화 내용 가져오기
+        const conversationHistory = await redisLoad(key);
+ 
+        console.log("Data All Load:", conversationHistory);
+
+        const response = await openai.chat.completions.create(
+            {
+                ...chatConfig,
+                messages:conversationHistory,
+          }
+        );
+
+        // 모델의 응답에서 답변 가져오기
+        const answer = response.choices[0].message.content;
+        console.log('ChatGPT 답변:', answer);
+
+        // 상담사 응답 저장
+        await redisSaveMsg(key, ROLE_ASSISTANT, answer);
+
+        return answer;
+
+    } catch (error) {
+        console.error('ChatGPT 요청 중 오류:', error);
+        await redisDelete(key);
+        throw error;
+    }
+}
+
+
+
+//처음 상담을 시작할 때 프롬프트 
+function createPromptCounselFirst(userName, topic)
 {
 
-    
 const prompt = [
     {
         role: 'system',
