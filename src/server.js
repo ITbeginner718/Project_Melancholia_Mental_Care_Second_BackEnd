@@ -4,6 +4,7 @@ import http from "http";
 import cors from "cors";
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid"; // ES Modules
+import {callChatGPT} from "./Chat/GPT_API.js"  //확장자까지 작성해줘야 함
 
 const app = express();
 const handleListen = ()=>console.log(`Listening on http://localhost:3002`);
@@ -38,42 +39,36 @@ const SocketIoServer = new Server(httpServer,{
 SocketIoServer.on("connection",(socket)=>{
     
     console.log("Socket이 연결되었습니다.",socket.id);
-    socket.emit('socket connect',`연결되었습니다.`);
+    socket.emit('socket connect',`통신 연결되었습니다.`);
 
     // 채팅 셋팅
-    socket.on("start chat", (msg, userName, topic, callBack_setRoomName)=>{
+    socket.on("start chat", async (msg, userName, topic, callBack_setRoomName)=>{
         console.log(socket.id, msg);
         // SocketIO는 기본적으로 room을 제공 
         //room:예를 들어 채팅room이 될 수도 있고, 카지노 도박 room이 될 수도 있음 
         socket["userName"]=userName;
         socket["topic"]= topic;
 
-        // roomName 설정
-        const roomName = `Room-${uuidv4()}`;
-
-        socket.join(roomName); //=> roomname으로 room에 참가
-
-        //누가 어디 room에 들어왔는지 알려줌
-        console.log(socket.rooms); //{GBx19_-JAy-RDODvAAAD(해당 소켓 id), room 이름1, room 이름2, room 이름3} => 해당 소켓이 어떤 room에 있는지 알려줌
-        
-        // 현재 room list 
-        const Rooms = SocketIoServer.sockets.adapter.rooms;
-
-        // room 정보 순회
-        Rooms.forEach((value, room) => {
-            console.log('Room:', room);
-        });
-
         //callback: roomName 전송
-        callBack_setRoomName(roomName);
+        callBack_setRoomName( socket["userName"].userName, socket["topic"].topic);
+
+        const gpt= await callChatGPT(socket["userName"].userName, socket["topic"].topic )
+        console.log("result:",gpt);
+        //상담 시작
+        socket.emit("AI-chat-message", gpt);
     });
+
+    socket.on('AI-chat-message', async(message)=>{
+        const gpt= await callChatGPT("","",message );
+        socket.emit("AI-chat-message",gpt );
+    });
+
+
+
+    //채팅 시작
 
     //채팅 종류 시 룸방 나가기
     socket.on("end chat", (roomName)=>{
-        console.log("room leave:", roomName);
-
-        // 채팅 종류 시 룸방 나가기
-        socket.leave(roomName);
     })
 
     //채팅 룸방 나가기
@@ -81,7 +76,7 @@ SocketIoServer.on("connection",(socket)=>{
         console.log("연결이 Disconnected 되었습니다.", socket.id,);
     })
 
-    //채팅 시작
+
 })
 
 // 포트 번호: 3002

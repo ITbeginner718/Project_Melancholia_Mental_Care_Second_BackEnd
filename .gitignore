@@ -1,1 +1,8 @@
 node_modules
+babel.config.json
+nodemon.json
+package-lock.json
+package.json
+.env
+
+info.txt
