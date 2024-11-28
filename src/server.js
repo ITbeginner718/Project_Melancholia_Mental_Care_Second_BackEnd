@@ -4,7 +4,7 @@ import http from "http";
 import cors from "cors";
 import axios from "axios";
 import { v4 } from 'uuid';
-import {callChatGPT, callChatGptFirst} from "./Chat/GPT_API.js"  //확장자까지 작성해줘야 함
+import {callChatGPT, callChatGptFirst, summaryCounseling} from "./Chat/GPT_API.js"  //확장자까지 작성해줘야 함
 import { redisDelete, redisInit } from "./Cache/redis.js";
 
 const app = express();
@@ -85,8 +85,37 @@ SocketIoServer.on("connection",(socket)=>{
 
     //채팅 시작
 
-    //채팅 종류 시 룸방 나가기
-    socket.on("end chat", (roomName)=>{
+    //채팅 종류 시 데이터 저장
+    socket.on("end chat", async(callBack_setFeedbackSummary)=>{
+        console.log("챗봇 종료");
+
+    try {
+
+        //데이터 요약 및 피드백
+        const summaryAndFeedback = await summaryCounseling(socket["key"]);
+
+        if(summaryAndFeedback)
+        {
+
+            //데이터 저장
+            const summary= summaryAndFeedback.summary;
+            const feedback =summaryAndFeedback.feedback;
+
+            
+            //callback 전송
+            callBack_setFeedbackSummary(feedback,summary);
+
+            //firebase 저장
+
+            
+
+        }
+
+    } catch (error) {
+        
+    }
+     
+        
     })
 
     //채팅 룸방 나가기

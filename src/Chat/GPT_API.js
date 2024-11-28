@@ -107,6 +107,43 @@ export async function callChatGPT(key, userMessage)
 }
 
 
+//상담 내용 요약
+export async function summaryCounseling(key)
+{
+    //데이터 로드
+    const messages = await redisLoad(key);
+
+    console.log("result: ",messages);
+
+    const responseSummary = await openai.chat.completions.create(
+        {
+            ...chatConfig,
+            messages:[
+                {role:"system", content:`
+                    다음 JSON 형식으로만 정확히 응답해줘. 다른 어떤 텍스트도 포함하지 마세요:
+                    {
+                        "summary": "여기에는 대화 내용의 핵심 요약만 작성",
+                        "feedback": "여기에는 대화에 대한 피드백과 개선점 작성"
+                    }
+                    형식을 절대 벗어나지 말고 JSON으로만 응답하세요.`
+                },
+                ...messages //... => spread로 배열 펼치기
+            ],
+      }
+    );
+
+    // 모델의 응답에서 답변 가져오기
+    const answer = responseSummary.choices[0].message.content;
+    let answerObject = null;
+    if(answer)
+    {
+        answerObject = JSON.parse(answer);
+    }
+
+    return answerObject;
+}
+
+
 
 //처음 상담을 시작할 때 프롬프트 
 function createPromptCounselFirst(userName, topic)
