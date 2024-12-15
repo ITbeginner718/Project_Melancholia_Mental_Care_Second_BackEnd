@@ -4,8 +4,9 @@ import http from "http";
 import cors from "cors";
 import axios from "axios";
 import { v4 } from 'uuid';
-import {callChatGPT, callChatGptFirst, summaryCounseling} from "./Chat/GPT_API.js"  //확장자까지 작성해줘야 함
-import { redisDelete, redisInit } from "./Cache/redis.js";
+import {callChatGPT, callChatGptFirst, callChatGptFirst_ing, summaryCounseling} from "./Chat/GPT_API.js"  //확장자까지 작성해줘야 함
+import { redisDelete, redisInit, redisLoad } from "./Cache/redis.js";
+import { saveConseling } from "./DB/db.js";
 
 const app = express();
 const handleListen = ()=>console.log(`Listening on http://localhost:3002`);
@@ -46,7 +47,7 @@ SocketIoServer.on("connection",(socket)=>{
 
         // 채팅 초기 셋팅
         // 클라이언트에서 socket.emit('start chat', ``, {userName}, {topic}, callBack_setRoomName);
-        // userName와 topic을 {} (객체 리터럴) 형태로 전송하기 때문에 서버에서 받을 때 구조 분해를 해줘야 함
+        // userName와 topic을 {} (객체 리터럴) 형태로 전송하기 때문에 서버에서 받을 때 구조 분해를 해줘야 함 => 받을 때도 {}로 받아야 함
         // 객체 리터럴 형태 Ex) {userName:"권순호"} {topic:"우울"}
         socket.on("start chat", async (msg, {userName}, {topic}, callBack_setRoomName)=>{
         console.log(socket.id, msg);
@@ -81,16 +82,43 @@ SocketIoServer.on("connection",(socket)=>{
         const responseGpt= await callChatGPT( socket["key"], userMessage );
         socket.emit("AI-chat-message", responseGpt );
     });
+    
+    //상담 시작(이어서 시작)
+    socket.on('start chat_ing', async({msg},{userName}, {topic}, {counselKeywordRecord},{pastFeedback},callBack_setStartChat_ing )=>{
+
+        console.log(socket.id, msg, counselKeywordRecord);
+        // SocketIO는 기본적으로 room을 제공 
+        //room:예를 들어 채팅room이 될 수도 있고, 카지노 도박 room이 될 수도 있음 
+        socket["userName"]=userName;
+        socket["topic"]= topic;
+
+        //chatbot key값 생성
+        const chatKey= v4();
+        
+        socket["key"] = chatKey;
+        
+        console.log(socket["userName"], socket["topic"], socket["key"]);
+
+        //callback: roomName 전송
+        callBack_setStartChat_ing(socket["userName"], socket["topic"], socket["key"]);
+
+        
+        const gpt= await callChatGptFirst_ing(socket["userName"], socket["topic"], socket["key"],counselKeywordRecord,pastFeedback );
+        console.log("result:",gpt);
+        //상담 시작
+        socket.emit("AI-chat-message", gpt);
+    
+    
+    });
 
 
     //채팅 시작
 
     //채팅 종류 시 데이터 저장
-    socket.on("end chat", async(callBack_setFeedbackSummary)=>{
+    socket.on('end chat', async(userId, callBack_setFeedbackSummary)=>{
         console.log("챗봇 종료");
 
     try {
-
         //데이터 요약 및 피드백
         const summaryAndFeedback = await summaryCounseling(socket["key"]);
 
@@ -98,27 +126,38 @@ SocketIoServer.on("connection",(socket)=>{
         {
 
             //데이터 저장
-            const summary= summaryAndFeedback.summary;
-            const feedback =summaryAndFeedback.feedback;
+            const counselSummary= summaryAndFeedback.summary;
+            const counselFeedback =summaryAndFeedback.feedback;
+            const counselKeywordRecord = summaryAndFeedback.counselKeywordRecord;
+            const topic = socket["topic"];
+
+            console.log("gpt summary:",counselSummary);
+            console.log("gpt feedback:",counselFeedback);
+            console.log("gpt counselRecord:",counselKeywordRecord);
+
+            //Load Counsel
+            const counselingRecord = await redisLoad(socket["key"]);
+
+            //처음 명령 프롬프트 값 삭제 후 저장
+            const filteredCounselingRecord = counselingRecord
+            .filter(item => item.role !== 'system');
 
             
             //callback 전송
-            callBack_setFeedbackSummary(feedback,summary);
+            callBack_setFeedbackSummary(counselFeedback,counselSummary, counselKeywordRecord );
 
             //firebase 저장
-
-            
-
+            saveConseling(userId, filteredCounselingRecord, counselFeedback,counselSummary,counselKeywordRecord, topic);
         }
 
     } catch (error) {
-        
+        console.log("error:", error);
     }
      
         
     })
 
-    //채팅 룸방 나가기
+    //상담 나가기
     socket.on("disconnect", ()=>{
         console.log("연결이 Disconnected 되었습니다.", socket.id,);
 
